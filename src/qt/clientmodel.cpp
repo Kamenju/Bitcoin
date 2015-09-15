@@ -117,15 +117,15 @@ void ClientModel::updateTimer()
         cachedReindexing = fReindex;
         cachedImporting = fImporting;
 
-        Q_EMIT numBlocksChanged(newNumBlocks, newBlockDate);
+        emit numBlocksChanged(newNumBlocks, newBlockDate);
     }
 
-    Q_EMIT bytesChanged(getTotalBytesRecv(), getTotalBytesSent());
+    emit bytesChanged(getTotalBytesRecv(), getTotalBytesSent());
 }
 
 void ClientModel::updateNumConnections(int numConnections)
 {
-    Q_EMIT numConnectionsChanged(numConnections);
+    emit numConnectionsChanged(numConnections);
 }
 
 void ClientModel::updateAlert(const QString &hash, int status)
@@ -138,11 +138,11 @@ void ClientModel::updateAlert(const QString &hash, int status)
         CAlert alert = CAlert::getAlertByHash(hash_256);
         if(!alert.IsNull())
         {
-            Q_EMIT message(tr("Network Alert"), QString::fromStdString(alert.strStatusBar), CClientUIInterface::ICON_ERROR);
+            emit message(tr("Network Alert"), QString::fromStdString(alert.strStatusBar), CClientUIInterface::ICON_ERROR);
         }
     }
 
-    Q_EMIT alertsChanged(getStatusBarWarnings());
+    emit alertsChanged(getStatusBarWarnings());
 }
 
 bool ClientModel::inInitialBlockDownload() const

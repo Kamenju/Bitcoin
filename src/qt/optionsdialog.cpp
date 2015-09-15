@@ -73,7 +73,7 @@ OptionsDialog::OptionsDialog(QWidget *parent, bool enableWallet) :
     /* Display elements init */
     QDir translations(":translations");
     ui->lang->addItem(QString("(") + tr("default") + QString(")"), QVariant(""));
-    Q_FOREACH(const QString &langStr, translations.entryList())
+    foreach(const QString &langStr, translations.entryList())
     {
         QLocale locale(langStr);
 
@@ -281,7 +281,7 @@ bool OptionsDialog::eventFilter(QObject *object, QEvent *event)
     {
         if(object == ui->proxyIp)
         {
-            Q_EMIT proxyIpChecks(ui->proxyIp, ui->proxyPort->text().toInt());
+            emit proxyIpChecks(ui->proxyIp, ui->proxyPort->text().toInt());
         }
     }
     return QDialog::eventFilter(object, event);
