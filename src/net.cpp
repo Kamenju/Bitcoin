@@ -107,6 +107,11 @@ boost::condition_variable messageHandlerCondition;
 static CNodeSignals g_signals;
 CNodeSignals& GetNodeSignals() { return g_signals; }
 
+// Variables for traffic shaping
+CLeakyBucket receiveShaper(0 ,0);
+CLeakyBucket sendShaper(0, 0);
+boost::chrono::steady_clock CLeakyBucket::clock;
+
 void AddOneShot(string strDest)
 {
     LOCK(cs_vOneShots);
@@ -655,12 +660,17 @@ void SocketSendData(CNode *pnode)
     while (it != pnode->vSendMsg.end()) {
         const CSerializeData &data = *it;
         assert(data.size() > pnode->nSendOffset);
-        int nBytes = send(pnode->hSocket, &data[pnode->nSendOffset], data.size() - pnode->nSendOffset, MSG_NOSIGNAL | MSG_DONTWAIT);
+
+        int amt2Send = min((int)(data.size() - pnode->nSendOffset),
+                sendShaper.available(SEND_SHAPER_MIN_FRAG));
+        if (amt2Send==0) break;
+        int nBytes = send(pnode->hSocket, &data[pnode->nSendOffset], amt2Send, MSG_NOSIGNAL | MSG_DONTWAIT);
         if (nBytes > 0) {
             pnode->nLastSend = GetTime();
             pnode->nSendBytes += nBytes;
             pnode->nSendOffset += nBytes;
             pnode->RecordBytesSent(nBytes);
+            bool empty = !sendShaper.leak(nBytes);
             if (pnode->nSendOffset == data.size()) {
                 pnode->nSendOffset = 0;
                 pnode->nSendSize -= data.size();
@@ -669,6 +679,7 @@ void SocketSendData(CNode *pnode)
                 // could not send full message; stop sending more
                 break;
             }
+            if (empty) break;  // Exceeded our send budget, stop sending more
         } else {
             if (nBytes < 0) {
                 // error
@@ -696,8 +707,17 @@ static list<CNode*> vNodesDisconnected;
 void ThreadSocketHandler()
 {
     unsigned int nPrevNodeCount = 0;
+
+
+    /*
+     * int progress is incremented if something happens.  If it is zero at the bottom
+     * of the loop, we delay.  This solves spin loop issues where the select does not
+     * block but no bytes can be transferred (traffic shaping limited, for example).
+     */
+    int progress;
     while (true)
     {
+        progress = 0;
         //
         // Disconnect nodes
         //
@@ -925,14 +945,18 @@ void ThreadSocketHandler()
             if (FD_ISSET(pnode->hSocket, &fdsetRecv) || FD_ISSET(pnode->hSocket, &fdsetError))
             {
                 TRY_LOCK(pnode->cs_vRecvMsg, lockRecv);
-                if (lockRecv)
+                const int amt2Recv = receiveShaper.available(RECV_SHAPER_MIN_FRAG);
+                if (lockRecv && amt2Recv > 0)
                 {
                     {
-                        // typical socket buffer is 8K-64K
-                        char pchBuf[0x10000];
+                        progress++;
+                        // max of min makes sure amt is in a range reasonable for buffer allocation
+                        const int amt = max(1, min(amt2Recv, MAX_RECV_CHUNK));
+                        char *pchBuf = new char[amt];
                         int nBytes = recv(pnode->hSocket, pchBuf, sizeof(pchBuf), MSG_DONTWAIT);
                         if (nBytes > 0)
                         {
+                            receiveShaper.leak(nBytes);
                             if (!pnode->ReceiveMsgBytes(pchBuf, nBytes))
                                 pnode->CloseSocketDisconnect();
                             pnode->nLastRecv = GetTime();
@@ -957,6 +981,8 @@ void ThreadSocketHandler()
                                 pnode->CloseSocketDisconnect();
                             }
                         }
+
+                        delete[] pchBuf;
                     }
                 }
             }
@@ -969,8 +995,11 @@ void ThreadSocketHandler()
             if (FD_ISSET(pnode->hSocket, &fdsetSend))
             {
                 TRY_LOCK(pnode->cs_vSend, lockSend);
-                if (lockSend)
+                if (lockSend && sendShaper.try_leak(0))
+                {
+                    progress++;
                     SocketSendData(pnode);
+                }
             }
 
             //
@@ -1006,6 +1035,9 @@ void ThreadSocketHandler()
             BOOST_FOREACH(CNode* pnode, vNodesCopy)
                 pnode->Release();
         }
+
+        if (progress == 0)  // Nothing happened even though select did not block.  So slow us down.
+            MilliSleep(50);
     }
 }
 
@@ -1634,6 +1666,10 @@ void static Discover(boost::thread_group& threadGroup)
 
 void StartNode(boost::thread_group& threadGroup, CScheduler& scheduler)
 {
+    //  Init network shapers
+    receiveShaper.set(GetArg("-receiveburst", 0) * 1000, GetArg("-receiveavg", 0) * 1000);
+    sendShaper.set(GetArg("-sendburst", 0) * 1000, GetArg("-sendavg", 0) * 1000);
+
     uiInterface.InitMessage(_("Loading addresses..."));
     // Load addresses for peers.dat
     int64_t nStart = GetTimeMillis();
