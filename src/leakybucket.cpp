@@ -59,7 +59,7 @@ int CLeakyBucket::available(int cutoff)
     return (level > cutoff) ? level : 0;
 }
 
-bool CLeakyBucket::try_leak(int amt)
+bool CLeakyBucket::try_consume(int amt)
 {
     if (fill == 0)
         return true; // leaky bucket is turned off.
@@ -73,7 +73,7 @@ bool CLeakyBucket::try_leak(int amt)
     return false;
 }
 
-bool CLeakyBucket::leak(int amt)
+bool CLeakyBucket::consume(int amt)
 {
     if (fill == 0)
         return true; // leaky bucket is turned off.

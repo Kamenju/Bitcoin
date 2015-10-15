@@ -670,7 +670,7 @@ void SocketSendData(CNode *pnode)
             pnode->nSendBytes += nBytes;
             pnode->nSendOffset += nBytes;
             pnode->RecordBytesSent(nBytes);
-            bool empty = !sendShaper.leak(nBytes);
+            bool empty = !sendShaper.consume(nBytes);
             if (pnode->nSendOffset == data.size()) {
                 pnode->nSendOffset = 0;
                 pnode->nSendSize -= data.size();
@@ -956,7 +956,7 @@ void ThreadSocketHandler()
                         int nBytes = recv(pnode->hSocket, pchBuf, sizeof(pchBuf), MSG_DONTWAIT);
                         if (nBytes > 0)
                         {
-                            receiveShaper.leak(nBytes);
+                            receiveShaper.consume(nBytes);
                             if (!pnode->ReceiveMsgBytes(pchBuf, nBytes))
                                 pnode->CloseSocketDisconnect();
                             pnode->nLastRecv = GetTime();
@@ -995,7 +995,7 @@ void ThreadSocketHandler()
             if (FD_ISSET(pnode->hSocket, &fdsetSend))
             {
                 TRY_LOCK(pnode->cs_vSend, lockSend);
-                if (lockSend && sendShaper.try_leak(0))
+                if (lockSend && sendShaper.try_consume(0))
                 {
                     progress++;
                     SocketSendData(pnode);
@@ -1036,8 +1036,8 @@ void ThreadSocketHandler()
                 pnode->Release();
         }
 
-        if (progress == 0)  // Nothing happened even though select did not block.  So slow us down.
-            MilliSleep(50);
+        if (progress == 0)  // We didn't consume as much as was available, select will just return immediately.
+            MilliSleep(50); // sleep a little. (50 decided by holding thumb in the air)
     }
 }
 

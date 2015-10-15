@@ -38,14 +38,14 @@ public:
     // Return the # tokens available if that amount is larger than the cutoff, otherwise return 0
     int available(int cutoff = 0);
 
-    // Try to use amt tokens.  Returns TRUE if the tokens were consumed, false otherwise
-    bool try_leak(int amount);
+    // Try to use \a amount tokens.  Returns true if the tokens can be consumed, false otherwise
+    bool try_consume(int amount);
 
     // This function reduces the level in the bucket by amt, even if that makes the
     // level negative, and returns true if the level is >= 0. This function is useful
     // in a situation like data receipt (with soft limits) where you are not certain
     // how many bytes will be received until after you have received them.
-    bool leak(int amount);
+    bool consume(int amount);
 
 protected:
     typedef boost::chrono::steady_clock CClock;
